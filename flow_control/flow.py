@@ -142,13 +142,16 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
                      default='',
                      display_name="Message",
                      multiline_editor='html')
-    tag = String(help="New Tag  ",
+    tag = String(help="List of Quiz Problems ids , seperated by comma or line break,The COMPLETE locator not only 32 alfanumeric  ",
                      scope=Scope.content,
                      default='',
-                     display_name="Tag (mhd)",
-                     multiline_editor='html')
+                     display_name="Quiz List",
+                     multiline_editor='True',
+		     resettable_editor=False)
     score = Float(scope=Scope.user_state, default = 0.0)
-    tag2 = String(scope=Scope.user_state)
+    quiz_score = Float (help = " The minimum score on quiz to pass " , default = 0.0, scope = Scope.content, display_name ="Coefficient for quiz" )
+    tag2 = String(help = "List of Quiz scores, float list , separated by commas ", 
+		  scope=Scope.content,default = '0,0,0')
     problem_id = String(help="Problem id to use for the condition.  (Not the "
                         "complete problem locator. Only the 32 characters "
                         "alfanumeric id. "
@@ -162,7 +165,7 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
                               "ids. Example: 618c5933b8b544e4a4cc103d3e508378"
                               ", 905333bd98384911bcec2a94bc30155f). "
                               "The simple average score for all problems will "
-                              "be used.",
+                              "be used.In case of FUll URL, you should write the full URL not only the 32 bits",
                               scope=Scope.content,
                               display_name="List of problems",
                               multiline_editor=True,
@@ -178,8 +181,9 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
                        'target_url',
                        'target_id',
                        'message',
-		       'tag') #,
-		     #  'tag2')
+		       'tag')#,
+		       #'tag2',
+		       #'quiz_score')
 
     def validate_field_data(self, validation, data):
         """
@@ -228,8 +232,10 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
         """  Returns the current condition status  """
         condition_reached = False
         problems = []
+	quizzes = []
 	LOGGER.info("self.condition %s ", self.condition)
-        if self.problem_id and self.condition == 'single_problem':
+        LOGGER.info("self.problem_id %s", self.problem_id)
+	if self.problem_id and self.condition == 'single_problem':
             # now split problem id by spaces or commas
             problems = re.split('\s*,*|\s*,\s*', self.problem_id)
             problems = filter(None, problems)
@@ -239,16 +245,35 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
             # now split list of problems id by spaces or commas
             problems = re.split('\s*,*|\s*,\s*', self.list_of_problems)
             problems = filter(None, problems)
-	if self.problem_id and self.condition == 'single_url':
+	if self.list_of_problems and self.condition == 'single_url':
             problems = re.split('\s*,*|\s*,\s*', self.list_of_problems)
 	    #problems = [self.problem_id]
 	    problems = filter (None, problems) 
+	    if self.tag:
+	    	quizzes = re.split('\s*,*|\s*,\s*', self.tag)
+		quizzes = filter (None, quizzes)
+		LOGGER.info("quizzes exist") 
 	   # problems = problems [:1]
 	    LOGGER.info ("mhdflow3 get cond %s ", problems) 
-        if problems:
-            condition_reached = self.condition_on_problem_list(problems)
+	    LOGGER.info ("mhdflow3 quizzes %s" , quizzes)
+        if problems and not quizzes:
+            condition_reached = self.condition_on_problem_list(problems,False)
+	    return condtion_reached
+	if problems and quizzes: 
+	   score1 = self.condition_on_problem_list(problems, True)
+	   score2 = self.condition_on_problem_list(quizzes, True)
+	   return self.compare_scores(max(score1,score2),100)
         return condition_reached
 
+    def quiz_weights(self): 
+	result = None
+	if self.tag2: 
+		weights = re.split('\s*,' , self.tag2)
+		weights= list (map(float, weights))
+		result = weights
+	#	result = [x * 2 for x in weights];
+	return result
+	
     def student_view(self, context=None):  # pylint: disable=unused-argument
         """  Returns a fragment for student view  """
         fragment = Fragment(u"<!-- This is the FlowCheckPointXblock -->")
@@ -259,7 +284,7 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
         in_studio_runtime = hasattr(self.xmodule_runtime, 'is_author_mode')
         index_base = 1
         default_tab = 'tab_{}'.format(self.tab_to - index_base)
-	self.tag2 = self.xmodule_runtime.user_id
+#	self.tag2 = self.xmodule_runtime.user_id
 #	score1 = Score(90,100)
 #	score2 = Score(50,100)
 #	if (self.tag2 == 6):
@@ -286,8 +311,9 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
                        "message": self.message ,
                        "in_studio_runtime": in_studio_runtime,
 		       "tag":self.tag,
-		       "tag2":self.tag2,
-		       "score":self.get_score()}) # we added this abc to our tag just to visualize
+		       "tag2":self.get_condition_status(), #self.quiz_weights(),
+		       "score":self.get_score(),
+		       "quiz_score": self.quiz_score}) # we added this abc to our tag just to visualize
 		       #"tag":"abc" + self.tag})
         return fragment
 
@@ -381,7 +407,7 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
         'has_null': has_null
     }
 
-    def condition_on_problem_list(self, problems):
+    def condition_on_problem_list(self, problems,quiz):
         """ Returns the score for a list of problems """
         # pylint: disable=no-member
         user_id = self.xmodule_runtime.user_id
@@ -405,7 +431,7 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
 
             except InvalidKeyError:
                 uk = _get_draft_usage_key(problem)
-   	    LOGGER.info("mhd uk usagekey %s", uk  )
+   	    #LOGGER.info("mhd uk usagekey %s", uk  )
             return uk
 
         def _get_draft_usage_key(problem):
@@ -433,34 +459,34 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
 
         def _calculate_total(first_score, second_score):
             total = first_score['total'] + second_score['total']
-            LOGGER.info("mhdflow2 total %s" , total)
+            #LOGGER.info("mhdflow2 total %s" , total)
 
 	    return {'total': total}
         
         usages_keys = map(_get_usage_key, problems)
-        LOGGER.info("mhdflow2 problems %s" , problems) 
-	LOGGER.info("mhdflow2  usage_keys %s ", usages_keys)
+        #LOGGER.info("mhdflow2 problems %s" , problems) 
+	#LOGGER.info("mhdflow2  usage_keys %s ", usages_keys)
 	
 	scores_client.fetch_scores(usages_keys)
         scores = map(scores_client.get, usages_keys)
-	LOGGER.info("mhdflow3 score %s" , scores)
 	scores = filter(None, scores)
+	LOGGER.info("mhdflow3 score %s" , scores)
         problems_to_answer = [score.total for score in scores]
         if self.operator in self.SPECIAL_COMPARISON_DISPATCHER.keys():
             evaluation = self.SPECIAL_COMPARISON_DISPATCHER[self.operator](
                 self,
                 problems_to_answer)
             return evaluation
-
+	LOGGER.info("mhdflow3 problems_to_answer %s",problems_to_answer)
         reducible_scores = map(_to_reducible, scores)
         correct = reduce(_calculate_correct, reducible_scores,
                          correct_neutral)
         total = reduce(_calculate_total, reducible_scores,
                        total_neutral)
 	LOGGER.info("calculatetotal%s  %s",reducible_scores,total_neutral)
-	
-        return self.compare_scores(correct['correct'], total['total'])
-
+	if not (quiz):	
+        	return self.compare_scores(correct['correct'], total['total'])
+        return (correct['correct'] / total['total'] ) * 100.0
     def has_submitted_answer(self):
         """
         Returns True if the problem has been answered by the runtime user.
@@ -501,8 +527,8 @@ class FlowCheckPointXblock(StudioEditableXBlockMixin, XBlock,ScorableXBlockMixin
         Returns:
             Score(raw_earned=float, raw_possible=float)
         """
- 	score1 = Score(90.35,100)
-        score2 = Score(50.50,100)
+ 	#score1 = Score(90.35,100)
+        #score2 = Score(50.50,100)
 	self.set_score (scoreTotal)
         #if (self.tag2 == 6):
          #       self.set_score(score1)

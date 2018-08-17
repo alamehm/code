@@ -74,6 +74,9 @@ var viewblocks = {
       break;
     case conditions.gradeOnUrl:
       $(uiSelectors.settingsFields).filter('[data-field-name="list_of_problems"]').show();
+      $(uiSelectors.settingsFields).filter('[data-field-name="tag2"]').show();
+      $(uiSelectors.settingsFields).filter('[data-field-name="quiz_score"]').show();
+      
       break;
 
     case conditions.gradeOnSection:
